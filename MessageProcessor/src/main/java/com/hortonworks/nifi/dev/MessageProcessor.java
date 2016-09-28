@@ -51,6 +51,12 @@ public class MessageProcessor extends AbstractProcessor {
 	public static final PropertyDescriptor PROP_URL = new PropertyDescriptor.Builder().name("WLS Connection URL")
 			.description("The WLS Queue to pull messages from").required(true)
 			.addValidator(StandardValidators.NON_EMPTY_VALIDATOR).build();
+	public static final PropertyDescriptor SECURITY_PRINCIPAL = new PropertyDescriptor.Builder().name("WLS Security Principal")
+			.description("The WLS Security Principal (username)").required(false)
+			.addValidator(StandardValidators.NON_EMPTY_VALIDATOR).build();
+	public static final PropertyDescriptor SECURITY_CREDENTIALS = new PropertyDescriptor.Builder().name("WLS Security Credentials")
+			.description("The WLS Security Credentials (password)").sensitive(true).required(false)
+			.addValidator(StandardValidators.NON_EMPTY_VALIDATOR).build();
 	public static final Relationship REL_SUCCESS = new Relationship.Builder().name("success")
 			.description("All FlowFiles that are received from the JMS Destination are routed to this relationship")
 			.build();
@@ -111,6 +117,8 @@ public class MessageProcessor extends AbstractProcessor {
 		List<PropertyDescriptor> properties = new ArrayList<PropertyDescriptor>();
 		properties.add(PROP_QUEUE);
 		properties.add(PROP_URL);
+		properties.add(SECURITY_PRINCIPAL);
+		properties.add(SECURITY_CREDENTIALS);
 		properties.add(PROP_JMS_FACTORY);
 		properties.add(PROP_JNDI_FACTORY);
 		this.properties = Collections.unmodifiableList(properties);
@@ -131,6 +139,12 @@ public class MessageProcessor extends AbstractProcessor {
 		Hashtable<String, String> env = new Hashtable<String, String>();
 		env.put(Context.INITIAL_CONTEXT_FACTORY, context.getProperty(PROP_JNDI_FACTORY).getValue());
 		env.put(Context.PROVIDER_URL, context.getProperty(PROP_URL).getValue());
+		if(context.getProperty(SECURITY_PRINCIPAL).isSet()){
+			env.put(Context.SECURITY_PRINCIPAL, context.getProperty(SECURITY_PRINCIPAL).getValue());
+		}
+		if(context.getProperty(SECURITY_CREDENTIALS).isSet()){
+			env.put(Context.SECURITY_CREDENTIALS, context.getProperty(SECURITY_CREDENTIALS).getValue());
+		}
 		return new InitialContext(env);
 	}
 	public void close() throws JMSException {
