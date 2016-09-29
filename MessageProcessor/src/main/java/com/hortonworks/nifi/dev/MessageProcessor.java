@@ -33,6 +33,19 @@ import org.apache.nifi.processor.io.OutputStreamCallback;
 import org.apache.nifi.processor.util.StandardValidators;
 
 public class MessageProcessor extends AbstractProcessor {
+	private final class MessageOutputStreamCallback implements OutputStreamCallback {
+		private TextMessage msgText;
+		private MessageOutputStreamCallback(TextMessage msgText){
+			this.msgText = msgText;
+		}
+		public void process(final OutputStream out) throws IOException {
+			try {
+				out.write(msgText.getText().getBytes());
+			} catch (JMSException e) {
+				e.printStackTrace();
+			}
+		}
+	}
 	private List<PropertyDescriptor> properties;
 	private Set<Relationship> relationships;
 	private QueueConnection qcon;
@@ -77,37 +90,27 @@ public class MessageProcessor extends AbstractProcessor {
 	}
 
 	private void processMessage(ProcessContext context, ProcessSession session) throws Exception {
-		final TextMessage msgText;
+		TextMessage msgText;
 		InitialContext ctx = getInitialContext(context);
 		Queue queue = (Queue) ctx.lookup(context.getProperty(PROP_QUEUE).getValue());
 		QueueConnectionFactory connFactory = (QueueConnectionFactory) ctx
 				.lookup(context.getProperty(PROP_JMS_FACTORY).getValue());
 		QueueConnection queueConn = connFactory.createQueueConnection();
-		QueueSession queueSession = queueConn.createQueueSession(false, Session.AUTO_ACKNOWLEDGE);
+		QueueSession queueSession = queueConn.createQueueSession(false, Session.CLIENT_ACKNOWLEDGE);
 		QueueReceiver queueReceiver = queueSession.createReceiver(queue);
 		queueConn.start();
-		msgText = (TextMessage) queueReceiver.receive(context.getProperty(QUEUE_RECEIVE_TIMEOUT).asLong());
 
-		System.out.println("received: " + msgText.getText());
-
-		if (msgText != null) {
-
+		while ( (msgText = (TextMessage) queueReceiver.receive(context.getProperty(QUEUE_RECEIVE_TIMEOUT).asLong())) != null) {
+			System.out.println("received: " + msgText.getText());
 			FlowFile flowFile = session.create();
-			flowFile = session.write(flowFile, new OutputStreamCallback() {
-
-				public void process(final OutputStream out) throws IOException {
-					try {
-						out.write(msgText.getText().getBytes());
-					} catch (JMSException e) {
-						e.printStackTrace();
-					}
-				}
-			});
+			flowFile = session.write(flowFile, new MessageOutputStreamCallback(msgText));
 			session.getProvenanceReporter().receive(flowFile, context.getProperty("MyProp").getValue());
 			session.transfer(flowFile, REL_SUCCESS);
+			msgText.acknowledge();
+			session.commit();
 		}
 		queueConn.close();
-		session.commit();
+		
 	}
 
 	@Override
