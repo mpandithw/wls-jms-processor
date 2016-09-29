@@ -57,6 +57,9 @@ public class MessageProcessor extends AbstractProcessor {
 	public static final PropertyDescriptor SECURITY_CREDENTIALS = new PropertyDescriptor.Builder().name("WLS Security Credentials")
 			.description("The WLS Security Credentials (password)").sensitive(true).required(false)
 			.addValidator(StandardValidators.NON_EMPTY_VALIDATOR).build();
+	public static final PropertyDescriptor QUEUE_RECEIVE_TIMEOUT = new PropertyDescriptor.Builder().name("Queue Receive Timeout")
+			.description("The amount of time in milliseconds to wait for a message to be received.").defaultValue("1000").required(true)
+			.addValidator(StandardValidators.LONG_VALIDATOR).build();
 	public static final Relationship REL_SUCCESS = new Relationship.Builder().name("success")
 			.description("All FlowFiles that are received from the JMS Destination are routed to this relationship")
 			.build();
@@ -83,7 +86,7 @@ public class MessageProcessor extends AbstractProcessor {
 		QueueSession queueSession = queueConn.createQueueSession(false, Session.AUTO_ACKNOWLEDGE);
 		QueueReceiver queueReceiver = queueSession.createReceiver(queue);
 		queueConn.start();
-		msgText = (TextMessage) queueReceiver.receive();
+		msgText = (TextMessage) queueReceiver.receive(context.getProperty(QUEUE_RECEIVE_TIMEOUT).asLong());
 
 		System.out.println("received: " + msgText.getText());
 
@@ -121,6 +124,7 @@ public class MessageProcessor extends AbstractProcessor {
 		properties.add(SECURITY_CREDENTIALS);
 		properties.add(PROP_JMS_FACTORY);
 		properties.add(PROP_JNDI_FACTORY);
+		properties.add(QUEUE_RECEIVE_TIMEOUT);
 		this.properties = Collections.unmodifiableList(properties);
 	}
 
