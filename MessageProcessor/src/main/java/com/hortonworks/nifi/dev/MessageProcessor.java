@@ -108,7 +108,8 @@ public class MessageProcessor extends AbstractProcessor {
 		conn.start();
 
 		TextMessage msgText;
-		while ( (msgText = (TextMessage) mc.receive(context.getProperty(QUEUE_RECEIVE_TIMEOUT).asLong())) != null) {
+		while (isScheduled() &&
+				(msgText = (TextMessage) mc.receive(context.getProperty(QUEUE_RECEIVE_TIMEOUT).asLong())) != null) {
 //			System.out.println("received: " + msgText.getText());
 			FlowFile flowFile = session.create();
 			flowFile = session.write(flowFile, new MessageOutputStreamCallback(msgText));
