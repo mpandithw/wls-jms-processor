@@ -14,9 +14,6 @@ import javax.jms.ConnectionFactory;
 import javax.jms.Destination;
 import javax.jms.JMSException;
 import javax.jms.MessageConsumer;
-import javax.jms.QueueConnection;
-import javax.jms.QueueReceiver;
-import javax.jms.QueueSession;
 import javax.jms.Session;
 import javax.jms.TextMessage;
 import javax.naming.Context;
@@ -50,9 +47,6 @@ public class MessageProcessor extends AbstractProcessor {
 	}
 	private List<PropertyDescriptor> properties;
 	private Set<Relationship> relationships;
-	private QueueConnection qcon;
-	private QueueSession qsession;
-	private QueueReceiver qreceiver;
 
 //	public static final AllowableValue QUEUE = new AllowableValue("QUEUE","QUEUE","Connect to a WebLogic Queue");
 //	public static final AllowableValue TOPIC = new AllowableValue("TOPIC","TOPIC","Connect to a WebLogic Topic");
@@ -162,10 +156,5 @@ public class MessageProcessor extends AbstractProcessor {
 			env.put(Context.SECURITY_CREDENTIALS, context.getProperty(SECURITY_CREDENTIALS).getValue());
 		}
 		return new InitialContext(env);
-	}
-	public void close() throws JMSException {
-		qreceiver.close();
-		qsession.close();
-		qcon.close();
 	}
 }
