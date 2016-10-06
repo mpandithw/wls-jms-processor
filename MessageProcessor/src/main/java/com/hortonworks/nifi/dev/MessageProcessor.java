@@ -107,7 +107,7 @@ public class MessageProcessor extends AbstractProcessor {
 //			System.out.println("received: " + msgText.getText());
 			FlowFile flowFile = session.create();
 			flowFile = session.write(flowFile, new MessageOutputStreamCallback(msgText));
-			session.getProvenanceReporter().receive(flowFile, context.getProperty("MyProp").getValue());
+			session.getProvenanceReporter().receive(flowFile, context.getProperty(PROP_TOPIC_OR_QUEUE_NAME).getValue());
 			session.transfer(flowFile, REL_SUCCESS);
 			msgText.acknowledge();
 			session.commit();
