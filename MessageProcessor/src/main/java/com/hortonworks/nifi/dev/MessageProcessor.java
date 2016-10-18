@@ -9,12 +9,11 @@ import java.util.Hashtable;
 import java.util.List;
 import java.util.Set;
 
+import javax.jms.Connection;
+import javax.jms.ConnectionFactory;
+import javax.jms.Destination;
 import javax.jms.JMSException;
-import javax.jms.Queue;
-import javax.jms.QueueConnection;
-import javax.jms.QueueConnectionFactory;
-import javax.jms.QueueReceiver;
-import javax.jms.QueueSession;
+import javax.jms.MessageConsumer;
 import javax.jms.Session;
 import javax.jms.TextMessage;
 import javax.naming.Context;
@@ -33,24 +32,50 @@ import org.apache.nifi.processor.io.OutputStreamCallback;
 import org.apache.nifi.processor.util.StandardValidators;
 
 public class MessageProcessor extends AbstractProcessor {
+	private final class MessageOutputStreamCallback implements OutputStreamCallback {
+		private TextMessage msgText;
+		private MessageOutputStreamCallback(TextMessage msgText){
+			this.msgText = msgText;
+		}
+		public void process(final OutputStream out) throws IOException {
+			try {
+				out.write(msgText.getText().getBytes());
+			} catch (JMSException e) {
+				e.printStackTrace();
+			}
+		}
+	}
 	private List<PropertyDescriptor> properties;
 	private Set<Relationship> relationships;
-	private QueueConnection qcon;
-	private QueueSession qsession;
-	private QueueReceiver qreceiver;
 
-	public static final PropertyDescriptor PROP_QUEUE = new PropertyDescriptor.Builder().name("Queue Name")
-			.description("The WLS Queue to pull messages from").required(true)
+//	public static final AllowableValue QUEUE = new AllowableValue("QUEUE","QUEUE","Connect to a WebLogic Queue");
+//	public static final AllowableValue TOPIC = new AllowableValue("TOPIC","TOPIC","Connect to a WebLogic Topic");
+//	public static final PropertyDescriptor CONNECTION_TYPE = new PropertyDescriptor.Builder().name("Connection type")
+//			.description("The type of WLS connection. (Topic or Queue)").required(true).allowableValues(QUEUE,TOPIC)
+//			.defaultValue(TOPIC.getValue())
+//			.addValidator(StandardValidators.NON_EMPTY_VALIDATOR).build();
+	
+	public static final PropertyDescriptor PROP_TOPIC_OR_QUEUE_NAME = new PropertyDescriptor.Builder().name("Topic/Queue Name")
+			.description("The WLS Topic/Queue to pull messages from").required(true)
 			.addValidator(StandardValidators.NON_EMPTY_VALIDATOR).build();
 	public static final PropertyDescriptor PROP_JMS_FACTORY = new PropertyDescriptor.Builder().name("JMS Factory Name")
-			.description("The WLS Queue to pull messages from").required(true)
+			.description("The JMS Factory Name").required(true)
 			.addValidator(StandardValidators.NON_EMPTY_VALIDATOR).build();
 	public static final PropertyDescriptor PROP_JNDI_FACTORY = new PropertyDescriptor.Builder()
-			.name("JNDI Factory Name").description("The WLS Queue to pull messages from").required(true)
+			.name("JNDI Factory Name").description("The JNDI Factory Name").required(true)
 			.addValidator(StandardValidators.NON_EMPTY_VALIDATOR).build();
 	public static final PropertyDescriptor PROP_URL = new PropertyDescriptor.Builder().name("WLS Connection URL")
-			.description("The WLS Queue to pull messages from").required(true)
+			.description("The WLS Connection URL").required(true)
 			.addValidator(StandardValidators.NON_EMPTY_VALIDATOR).build();
+	public static final PropertyDescriptor SECURITY_PRINCIPAL = new PropertyDescriptor.Builder().name("WLS Security Principal")
+			.description("The WLS Security Principal (username)").required(false)
+			.addValidator(StandardValidators.NON_EMPTY_VALIDATOR).build();
+	public static final PropertyDescriptor SECURITY_CREDENTIALS = new PropertyDescriptor.Builder().name("WLS Security Credentials")
+			.description("The WLS Security Credentials (password)").sensitive(true).required(false)
+			.addValidator(StandardValidators.NON_EMPTY_VALIDATOR).build();
+	public static final PropertyDescriptor QUEUE_RECEIVE_TIMEOUT = new PropertyDescriptor.Builder().name("Topic/Queue Receive Timeout")
+			.description("The amount of time in milliseconds to wait for a message to be received.").defaultValue("15000").required(true)
+			.addValidator(StandardValidators.LONG_VALIDATOR).build();
 	public static final Relationship REL_SUCCESS = new Relationship.Builder().name("success")
 			.description("All FlowFiles that are received from the JMS Destination are routed to this relationship")
 			.build();
@@ -59,7 +84,7 @@ public class MessageProcessor extends AbstractProcessor {
 
 	@Override
 	public void onTrigger(ProcessContext context, ProcessSession session) throws ProcessException {
-		System.out.println("Inside OnTrigger=====================: ");
+//		System.out.println("Inside OnTrigger=====================: ");
 		try {
 			processMessage(context, session);
 		} catch (Exception e) {
@@ -68,51 +93,44 @@ public class MessageProcessor extends AbstractProcessor {
 	}
 
 	private void processMessage(ProcessContext context, ProcessSession session) throws Exception {
-		final TextMessage msgText;
 		InitialContext ctx = getInitialContext(context);
-		Queue queue = (Queue) ctx.lookup(context.getProperty(PROP_QUEUE).getValue());
-		QueueConnectionFactory connFactory = (QueueConnectionFactory) ctx
-				.lookup(context.getProperty(PROP_JMS_FACTORY).getValue());
-		QueueConnection queueConn = connFactory.createQueueConnection();
-		QueueSession queueSession = queueConn.createQueueSession(false, Session.AUTO_ACKNOWLEDGE);
-		QueueReceiver queueReceiver = queueSession.createReceiver(queue);
-		queueConn.start();
-		msgText = (TextMessage) queueReceiver.receive();
+		ConnectionFactory connFactory = (ConnectionFactory) ctx.lookup(context.getProperty(PROP_JMS_FACTORY).getValue());
+		Connection conn = connFactory.createConnection();
+		Session jmsSession = conn.createSession(false, Session.CLIENT_ACKNOWLEDGE);
+		Destination destination = (Destination) ctx.lookup(context.getProperty(PROP_TOPIC_OR_QUEUE_NAME).getValue());
+		MessageConsumer mc = jmsSession.createConsumer(destination);
+		conn.start();
 
-		System.out.println("received: " + msgText.getText());
-
-		if (msgText != null) {
-
+		TextMessage msgText;
+		while (isScheduled() &&
+				(msgText = (TextMessage) mc.receive(context.getProperty(QUEUE_RECEIVE_TIMEOUT).asLong())) != null) {
+//			System.out.println("received: " + msgText.getText());
 			FlowFile flowFile = session.create();
-			flowFile = session.write(flowFile, new OutputStreamCallback() {
-
-				public void process(final OutputStream out) throws IOException {
-					try {
-						out.write(msgText.getText().getBytes());
-					} catch (JMSException e) {
-						e.printStackTrace();
-					}
-				}
-			});
-			session.getProvenanceReporter().receive(flowFile, context.getProperty("MyProp").getValue());
+			flowFile = session.write(flowFile, new MessageOutputStreamCallback(msgText));
+			session.getProvenanceReporter().receive(flowFile, context.getProperty(PROP_TOPIC_OR_QUEUE_NAME).getValue());
 			session.transfer(flowFile, REL_SUCCESS);
+			msgText.acknowledge();
+			session.commit();
 		}
-		queueConn.close();
-		session.commit();
+		conn.close();
+		
 	}
 
 	@Override
 	protected void init(final ProcessorInitializationContext context) {
-		System.out.println("Inside Processor Init.");
+//		System.out.println("Inside Processor Init.");
 		final Set<Relationship> relationships = new HashSet<Relationship>();
 		relationships.add(REL_SUCCESS);
 		relationships.add(REL_FAILURE);
 		this.relationships = Collections.unmodifiableSet(relationships);
 		List<PropertyDescriptor> properties = new ArrayList<PropertyDescriptor>();
-		properties.add(PROP_QUEUE);
+		properties.add(PROP_TOPIC_OR_QUEUE_NAME);
 		properties.add(PROP_URL);
+		properties.add(SECURITY_PRINCIPAL);
+		properties.add(SECURITY_CREDENTIALS);
 		properties.add(PROP_JMS_FACTORY);
 		properties.add(PROP_JNDI_FACTORY);
+		properties.add(QUEUE_RECEIVE_TIMEOUT);
 		this.properties = Collections.unmodifiableList(properties);
 	}
 
@@ -127,15 +145,16 @@ public class MessageProcessor extends AbstractProcessor {
 	}
 
 	private static InitialContext getInitialContext(ProcessContext context) throws NamingException {
-		System.out.println("Inside InitialContext.");
+//		System.out.println("Inside InitialContext.");
 		Hashtable<String, String> env = new Hashtable<String, String>();
 		env.put(Context.INITIAL_CONTEXT_FACTORY, context.getProperty(PROP_JNDI_FACTORY).getValue());
 		env.put(Context.PROVIDER_URL, context.getProperty(PROP_URL).getValue());
+		if(context.getProperty(SECURITY_PRINCIPAL).isSet()){
+			env.put(Context.SECURITY_PRINCIPAL, context.getProperty(SECURITY_PRINCIPAL).getValue());
+		}
+		if(context.getProperty(SECURITY_CREDENTIALS).isSet()){
+			env.put(Context.SECURITY_CREDENTIALS, context.getProperty(SECURITY_CREDENTIALS).getValue());
+		}
 		return new InitialContext(env);
-	}
-	public void close() throws JMSException {
-		qreceiver.close();
-		qsession.close();
-		qcon.close();
 	}
 }
